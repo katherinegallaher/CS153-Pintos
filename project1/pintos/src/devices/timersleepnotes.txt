@@ -1,0 +1,18 @@
+call in and sleeps for tha tmany ticks
+you do nothing, thread is not sleeping
+burning CP
+
+TO DO 
+int64_t start = timer_ticks()
+interrupt should be on 
+assert
+	thread yield
+interrupt should be off by now
+
+
+get current thread 
+what time to awake thread
+	using ticks timer_tick + ticks
+ASSERT
+assign a time for when should wake - check lib/kernel
+thread to sleep -func call this turn off interrupt

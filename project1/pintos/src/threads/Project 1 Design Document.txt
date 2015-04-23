@@ -1,0 +1,271 @@
+			+--------------------+
+			|        CS 140      |
+			| PROJECT 1: THREADS |
+			|   DESIGN DOCUMENT  |
+			+--------------------+
+				   
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Katherine Gallaher <kgall005@ucr.edu>
+Shilpa Chirackel <schir001@ucr.edu>> 
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+			     ALARM CLOCK
+			     ===========
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+
+Added global variable in timer.c:
+   static struct list sleepList; /* List that holds threads that are sleeping  */
+
+Added to struct thread:
+
+   /* Members for implementing timer_sleep() and timer_interrupt().  */
+   int64_t awakeTime;     /* Holds when a thread should be woken up  */
+   struct semaphore sema; /* Down when thread goes to sleep
+			     Up when thread wakes up.        */
+   struct list_elem timerelem; /* List element for timer.  */
+
+Added comparator function:
+   bool tickCmp(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);  /* Comparison function for ticks. */
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+
+   timer_sleep() gets the current thread and sets its time to awake to the number of ticks desired. The thread is then added to the sleep list which contains all the threads that are asleep in order of awake time, with the thread with the smallest awake time first in the list. 
+   In the timer interrupt handler until the list is empty or until the awake time of the first thread is greater than the number of ticks the first item of the sleep list is removed, in order to wake it up.  
+
+>> A3: What steps are taken to minimize the amount of time spent in
+>> the timer interrupt handler?
+   A step that is taken to minimize the amount of time spent is that sleepList is in sorted order from shortest to longest wake time. Therefore, timer interrupt does not spend extra time iterating through the entire sleep list every time it is executed. 
+
+---- SYNCHRONIZATION ----
+
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously?
+ 
+   Race conditions are avoided by disabling interrupts at the beginning of timer_sleep. 
+
+>> A5: How are race conditions avoided when a timer interrupt occurs
+>> during a call to timer_sleep()?
+
+   Race conditions are avoided by disabling interrupts at the beginning of timer_sleep. 
+   
+---- RATIONALE ----
+
+>> A6: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+   We chose to use semaphores in our project. We decided to use semaphores because it is easier for the programmer to handle. It is superior because the programmer doesn't have to manually enable and disable interrupts. We also chose to have a sleep list that is sorted by wake time which minimizes the amount of time in timer_interrupt.  
+
+			 PRIORITY SCHEDULING
+			 ===================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+  Added to struct thread:
+    struct list_elem priorityelem; /* List element for timer.  */
+	int origPrio;              /* Old priority of thread. */
+	struct list donorList;         /* List for priority donation, holds locks. */
+	struct lock *lockWait;         /* Lock waiting for donor list. */
+
+   Added comparator function:
+     bool priorityCmp(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);  /* Comparison function for ticks. */
+
+   Added comparator function:
+     bool condCmp(const struct list_elem *a, const struct list_elem *b, void
+	 *aux UNUSED); /* Comparison function for condition variable. */
+
+   Added priority donation function:
+     void priorityDonate(struct lock *lock); /* Function to donate priorities.  */
+
+   Added a priority update function:
+     void updatePrio(); /* Updates priority. */
+
+>> B2: Explain the data structure used to track priority donation.
+>> Use ASCII art to diagram a nested donation.  (Alternately, submit a
+>> .png file.)
+   We will use a list to track priority donation. The list is a linked list that is ordered by highest priority where the first item in the list is the lowest priority. If a nested donation occurs a function that determines the max priority is called and the donation occurs on the max priority. 
+
+   Here is an example of a nested donation: 
+   Let L, M, H be threads and let A, B be locks.
+   Let priority be: L=20, M=40, H=60.
+
+   1. L=20.
+   L ----- A
+
+   2. L=20, M=40. M has lock B and L has lock A blocks M. M donates to L
+   L ----- A
+   |
+   |
+   M ------B
+
+   3. L=40, M=40, H=60. After M donates to L, H donates priority to M. M wants to get lock A. 
+   L------ A 
+   |
+   |
+   M------ B
+   |
+   |
+   H 
+
+   4. L=60, M=60, H=60. H wants to get lock B.
+   L------ A 
+   |
+   |
+   M ------B
+   |
+   |
+   H
+
+---- ALGORITHMS ----
+
+>> B3: How do you ensure that the highest priority thread waiting for
+>> a lock, semaphore, or condition variable wakes up first?
+
+   The ready list is ordered according to priority. The thread with the highest priority thread is last in the list. If the priority is updated the list is also updated so that the last item in the list has the highest priority. Because the list is ordered according to priority the highest priority thread will be woken up first. 
+
+>> B4: Describe the sequence of events when a call to lock_acquire()
+>> causes a priority donation.  How is nested donation handled?
+
+   In lock_acquire() we first disable interrupts. If the lock in question has
+   a holder then the current thread's lock that it's waiting on (lockWait) is
+   updated to the current lock. Then we push back onto the lock holder's donor
+   list the current thread. Then we do priority donation. In order to do
+   priority donation we check if the lock has a holder. If it does and the
+   current thread's priority is greater than the lock holder's priority we
+   update the lock holder's priority to the current thread's priority. Then we
+   continue the loop, changing the current thread we're looking at to the
+   lock's holder. 
+
+>> B5: Describe the sequence of events when lock_release() is called
+>> on a lock that a higher-priority thread is waiting for.
+
+   First, the lock holder's priority is set to it's original priority. Then
+   the lock holder is set to NULL, because it released the lock so there is no
+   longer a holder. Then the donor list is traversed and all of the donors
+   related to the lock are removed from the list. Then all of the priorities
+   in the list are updated. Then we thread_yield and return the interrupts. 
+
+---- SYNCHRONIZATION ----
+
+>> B6: Describe a potential race in thread_set_priority() and explain
+>> how your implementation avoids it.  Can you use a lock to avoid
+>> this race?
+
+   A race condition can happen if multiple threads are trying to set priority at the same time. 
+   To avoid race conditions interrupts are turned off. Locks cannot be used because the interrupt handler can't get locks.
+
+---- RATIONALE ----
+
+>> B7: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+   We chose this design because it can be done with fewer variables and can also be implemented using the linked list that was given to us. 
+   Another possible design we could have used is to put everything concerning locks in the thread struct. Our design is better because it's conservative in implementation. 
+
+			  ADVANCED SCHEDULER
+			  ==================
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+---- ALGORITHMS ----
+
+>> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
+>> has a recent_cpu value of 0.  Fill in the table below showing the
+>> scheduling decision and the priority and recent_cpu values for each
+>> thread after each given number of timer ticks:
+
+timer  recent_cpu    priority   thread
+ticks   A   B   C   A   B   C   to run
+-----  --  --  --  --  --  --   ------
+ 0
+ 4
+ 8
+12
+16
+20
+24
+28
+32
+36
+
+>> C3: Did any ambiguities in the scheduler specification make values
+>> in the table uncertain?  If so, what rule did you use to resolve
+>> them?  Does this match the behavior of your scheduler?
+
+>> C4: How is the way you divided the cost of scheduling between code
+>> inside and outside interrupt context likely to affect performance?
+
+---- RATIONALE ----
+
+>> C5: Briefly critique your design, pointing out advantages and
+>> disadvantages in your design choices.  If you were to have extra
+>> time to work on this part of the project, how might you choose to
+>> refine or improve your design?
+
+>> C6: The assignment explains arithmetic for fixed-point math in
+>> detail, but it leaves it open to you to implement it.  Why did you
+>> decide to implement it the way you did?  If you created an
+>> abstraction layer for fixed-point math, that is, an abstract data
+>> type and/or a set of functions or macros to manipulate fixed-point
+>> numbers, why did you do so?  If not, why not?
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+   
+   Part 2 was very difficult to grasp. Part 1 was very well explained to us in
+   lab, however part 2 was not covereed as heavily. And I feel that we should
+   have been given more guidance. There is a lot of code to add and change for
+   part 2 that I was unaware of at first. 
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+   
+   I feel that more guidance should be given for part 2, including functions
+   that should be changed in synch.c
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+   More office hours would have been immensely helpful.
+
+>> Any other comments?
